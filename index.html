@@ -2,39 +2,77 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Game Hadis | Ahmadi</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Game Hadis Mobile | Ahmadi</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; background: #222; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        body { 
+            margin: 0; padding: 0; background: #111; 
+            font-family: 'Segoe UI', sans-serif; 
+            overflow: hidden; /* Mencegah scroll halaman */
+            touch-action: none; /* Mencegah zoom/geser layar browser */
+        }
         
-        /* UI Overlay (Sama seperti sebelumnya) */
+        /* UI Overlay (Quiz & Game Over) */
         #ui-layer, #game-over {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: none; justify-content: center; align-items: center;
-            z-index: 10;
+            z-index: 100; /* Paling atas */
         }
-        #ui-layer { background: rgba(0, 0, 0, 0.8); }
-        #game-over { background: black; color: white; flex-direction: column; z-index: 20; }
+        #ui-layer { background: rgba(0, 0, 0, 0.85); }
+        #game-over { background: black; color: white; flex-direction: column; z-index: 200; }
 
         .modal {
-            background: white; padding: 30px; border-radius: 10px; width: 400px; text-align: center;
+            background: white; padding: 20px; border-radius: 10px; 
+            width: 90%; max-width: 400px; /* Agar pas di HP */
+            text-align: center;
             box-shadow: 0 0 20px rgba(0,0,0,0.5); border: 4px solid #4CAF50;
         }
-        h2 { margin-top: 0; color: #333; }
+        h2 { margin-top: 0; color: #333; font-size: 1.2rem; }
+        p { font-size: 1rem; color: #555; }
+
         .btn-option {
             display: block; width: 100%; padding: 12px; margin: 8px 0;
-            background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer;
+            background: #2196F3; color: white; border: none; border-radius: 5px; 
+            font-size: 1rem; cursor: pointer; touch-action: manipulation;
         }
-        .btn-option:hover { background: #1976D2; }
-        .restart-btn { margin-top: 20px; padding: 10px 20px; font-size: 1.2rem; cursor: pointer; }
+        .btn-option:active { background: #1976D2; transform: scale(0.98); }
+        .restart-btn { margin-top: 20px; padding: 15px 30px; font-size: 1.2rem; cursor: pointer; }
+
+        /* --- KONTROLER MOBILE (D-PAD) --- */
+        #mobile-controls {
+            position: absolute; bottom: 20px; left: 20px;
+            z-index: 50; display: none; /* Default sembunyi di Desktop */
+        }
+        /* Tampilkan kontrol hanya di layar kecil (HP/Tablet) */
+        @media (max-width: 1024px) {
+            #mobile-controls { display: grid; grid-template-columns: 60px 60px 60px; gap: 10px; }
+        }
+
+        .d-btn {
+            width: 60px; height: 60px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%; color: white; font-size: 24px;
+            display: flex; justify-content: center; align-items: center;
+            user-select: none; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .d-btn:active { background: rgba(255, 255, 255, 0.5); }
+        
+        /* Posisi Tombol Grid */
+        #btn-up { grid-column: 2; }
+        #btn-left { grid-column: 1; }
+        #btn-down { grid-column: 2; }
+        #btn-right { grid-column: 3; }
+
     </style>
 </head>
 <body>
 
     <div id="ui-layer">
         <div class="modal">
-            <h2>Pak Ahmadi bertanya:</h2>
+            <h2>Uji Kompetensi:</h2>
             <p id="question-text">...</p>
             <div id="options-container"></div>
         </div>
@@ -42,13 +80,50 @@
 
     <div id="game-over">
         <h1 style="color: red;">GAME OVER</h1>
-        <p>Innalillahi wa inna ilaihi raji'un</p>
+        <p>Tetap semangat belajar hadis!</p>
         <h2 id="final-score">Skor: 0</h2>
-        <button class="restart-btn" onclick="location.reload()">Coba Lagi</button>
+        <button class="restart-btn" onclick="location.reload()">Main Lagi</button>
+    </div>
+
+    <div id="mobile-controls">
+        <div></div> <div id="btn-up" class="d-btn">▲</div>
+        <div></div> <div id="btn-left" class="d-btn">◀</div>
+        <div id="btn-down" class="d-btn">▼</div>
+        <div id="btn-right" class="d-btn">▶</div>
     </div>
 
     <script>
-        // --- 1. DATA GAME ---
+        // --- 1. SETUP VARIABEL TOUCH ---
+        // Kita butuh variabel boolean untuk mengecek status tombol layar
+        let touchLeft = false;
+        let touchRight = false;
+        let touchUp = false;
+        let touchDown = false;
+
+        // Fungsi Helper untuk memasang event listener ke tombol HTML
+        function setupBtn(id, setVal) {
+            const btn = document.getElementById(id);
+            // Saat disentuh / diklik mouse
+            const start = (e) => { e.preventDefault(); setVal(true); };
+            // Saat dilepas / mouse keluar
+            const end = (e) => { e.preventDefault(); setVal(false); };
+
+            btn.addEventListener('touchstart', start, {passive: false});
+            btn.addEventListener('touchend', end);
+            btn.addEventListener('mousedown', start);
+            btn.addEventListener('mouseup', end);
+            btn.addEventListener('mouseleave', end);
+        }
+
+        // Pasang Event Listener setelah halaman load
+        window.addEventListener('load', () => {
+            setupBtn('btn-left', (v) => touchLeft = v);
+            setupBtn('btn-right', (v) => touchRight = v);
+            setupBtn('btn-up', (v) => touchUp = v);
+            setupBtn('btn-down', (v) => touchDown = v);
+        });
+
+        // --- 2. DATA GAME & TILEMAP ---
         const questionBank = [
             { q: "Kitab hadis yang paling shahih setelah Al-Qur'an adalah?", options: ["Sahih Muslim", "Sahih Bukhari", "Sunan Abu Daud", "Muwatha Malik"], answer: 1 },
             { q: "Siapakah sahabat yang paling banyak meriwayatkan hadis?", options: ["Ali bin Abi Thalib", "Umar bin Khattab", "Abu Hurairah", "Aisyah RA"], answer: 2 },
@@ -56,9 +131,6 @@
             { q: "Lawan dari hadis Shahih adalah?", options: ["Hasan", "Dhaif", "Maudhu'", "Aziz"], answer: 2 }
         ];
 
-        // --- 2. DESAIN LEVEL (TILEMAP MANUAL) ---
-        // 1 = Dinding (Rak Buku), 0 = Jalan, 9 = Posisi Awal Player
-        // Kita buat peta ukuran 20x15 block (tiap block 40px)
         const levelMap = [
             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
             [1,9,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1],
@@ -75,13 +147,18 @@
             [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
         ];
         
-        const TILE_SIZE = 40; // Ukuran kotak dalam pixel
+        const TILE_SIZE = 40;
 
-        // --- 3. CONFIG PHASER ---
+        // --- 3. CONFIG PHASER (UPDATE UNTUK MOBILE) ---
         const config = {
             type: Phaser.AUTO,
-            width: 800, // 20 tiles * 40px
-            height: 520, // 13 tiles * 40px
+            // Fitur Scale Manager agar pas di layar HP
+            scale: {
+                mode: Phaser.Scale.FIT, // Game akan menyesuaikan ukuran layar (aspect ratio terjaga)
+                autoCenter: Phaser.Scale.CENTER_BOTH, // Posisi tengah
+                width: 800, 
+                height: 520
+            },
             backgroundColor: '#2d2d2d',
             physics: {
                 default: 'arcade',
@@ -96,127 +173,85 @@
         let score = 0, lives = 3;
         let scoreText, livesText;
         let isQuizActive = false;
-        let startPos = {x: 0, y: 0}; // Untuk reset posisi jika kena musuh
+        let startPos = {x: 0, y: 0};
 
-        function preload() {
-            // Membuat aset grafis programmatically
-        }
+        function preload() { /* Procedural Generation */ }
 
         function create() {
-            // --- GENERATE TEXTURES ---
             let g = this.make.graphics({x:0, y:0, add:false});
             
-            // 1. Texture Dinding (Rak Buku - Coklat)
-            g.fillStyle(0x8B4513, 1); 
-            g.fillRect(0,0, TILE_SIZE, TILE_SIZE);
-            g.lineStyle(2, 0x5c2e0b, 1); // Garis tepi
-            g.strokeRect(0,0, TILE_SIZE, TILE_SIZE);
+            // Texture Wall
+            g.fillStyle(0x8B4513, 1); g.fillRect(0,0, TILE_SIZE, TILE_SIZE);
+            g.lineStyle(2, 0x5c2e0b, 1); g.strokeRect(0,0, TILE_SIZE, TILE_SIZE);
             g.generateTexture('wall', TILE_SIZE, TILE_SIZE);
 
-            // 2. Texture Player (Biru)
+            // Texture Player (Biru)
             g.clear(); g.fillStyle(0x3498db, 1); g.fillRect(0,0, 30, 30);
             g.generateTexture('player', 30, 30);
 
-            // 3. Texture Musuh (Merah - Perawi Palsu)
+            // Texture Musuh (Merah)
             g.clear(); g.fillStyle(0xe74c3c, 1); g.fillCircle(15, 15, 15);
             g.generateTexture('enemy', 30, 30);
 
-            // 4. Texture Kitab (Kuning Emas)
-            // g.clear(); g.fillStyle(0xf1c40f, 1); g.fillRect(0,0, 20, 24);
-            // g.generateTexture('book', 20, 24);
-
-            // 4. Texture Kitab (Kuning Emas - BENTUK BINTANG)
-            g.clear();
-            g.fillStyle(0xf1c40f, 1); // Warna Kuning
-
-            // Menggambar pola Bintang
+            // Texture Kitab (Bintang Kuning)
+            g.clear(); g.fillStyle(0xf1c40f, 1);
             g.beginPath();
-            g.moveTo(12, 0);  // Ujung Atas
-            g.lineTo(15, 9);
-            g.lineTo(24, 9);  // Sayap Kanan
-            g.lineTo(17, 15);
-            g.lineTo(19, 24); // Kaki Kanan
-            g.lineTo(12, 19); // Tengah Bawah
-            g.lineTo(5, 24);  // Kaki Kiri
-            g.lineTo(7, 15);
-            g.lineTo(0, 9);   // Sayap Kiri
-            g.lineTo(9, 9);
-            g.closePath();
-            g.fillPath();
-
-            // Simpan texture (nama tetap 'book' agar logika game tidak error)
+            g.moveTo(12, 0); g.lineTo(15, 9); g.lineTo(24, 9); g.lineTo(17, 15);
+            g.lineTo(19, 24); g.lineTo(12, 19); g.lineTo(5, 24); g.lineTo(7, 15);
+            g.lineTo(0, 9); g.lineTo(9, 9);
+            g.closePath(); g.fillPath();
             g.generateTexture('book', 24, 24);
 
-            // --- BUILD MAP DARI ARRAY ---
-            walls = this.physics.add.staticGroup(); // Group dinding (tak bergerak)
+            // --- BUILD MAP ---
+            walls = this.physics.add.staticGroup();
             
-            // Loop Array 2 Dimensi
             for(let r = 0; r < levelMap.length; r++) {
                 for(let c = 0; c < levelMap[r].length; c++) {
                     let tileType = levelMap[r][c];
                     let x = c * TILE_SIZE + TILE_SIZE/2;
                     let y = r * TILE_SIZE + TILE_SIZE/2;
 
-                    if(tileType === 1) {
-                        walls.create(x, y, 'wall');
-                    } else if (tileType === 9) {
-                        startPos = {x: x, y: y}; // Simpan posisi start
-                    }
+                    if(tileType === 1) walls.create(x, y, 'wall');
+                    else if (tileType === 9) startPos = {x: x, y: y};
                 }
             }
 
-            // --- PLAYER ---
+            // --- ENTITIES ---
             player = this.physics.add.sprite(startPos.x, startPos.y, 'player');
             player.setCollideWorldBounds(true);
-            
-            // Tabrakan Player vs Dinding
             this.physics.add.collider(player, walls);
 
-            // --- MUSUH (PERAWI PALSU) ---
             enemies = this.physics.add.group();
-            // Buat 4 musuh di posisi acak yang kosong (0)
             for(let i=0; i<4; i++) {
-                // Cari posisi acak valid (bukan dinding)
                 let ex, ey, valid = false;
                 while(!valid) {
                     let r = Phaser.Math.Between(1, levelMap.length-2);
                     let c = Phaser.Math.Between(1, levelMap[0].length-2);
-                    if(levelMap[r][c] === 0) {
-                        ex = c * TILE_SIZE + 20;
-                        ey = r * TILE_SIZE + 20;
-                        valid = true;
-                    }
+                    if(levelMap[r][c] === 0) { ex = c*40+20; ey = r*40+20; valid = true; }
                 }
                 let enemy = enemies.create(ex, ey, 'enemy');
-                enemy.setBounce(1); // Mental jika nabrak
-                enemy.setCollideWorldBounds(true);
+                enemy.setBounce(1); enemy.setCollideWorldBounds(true);
                 enemy.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-100, 100));
             }
-            
-            this.physics.add.collider(enemies, walls); // Musuh mantul dinding
-            this.physics.add.overlap(player, enemies, hitEnemy, null, this); // Player kena musuh
+            this.physics.add.collider(enemies, walls);
+            this.physics.add.overlap(player, enemies, hitEnemy, null, this);
 
-            // --- KITAB HADIS ---
             books = this.physics.add.group();
             for(let i=0; i<6; i++) {
                 let bx, by, valid = false;
                 while(!valid) {
                     let r = Phaser.Math.Between(1, levelMap.length-2);
                     let c = Phaser.Math.Between(1, levelMap[0].length-2);
-                    if(levelMap[r][c] === 0) {
-                        bx = c * TILE_SIZE + 20;
-                        by = r * TILE_SIZE + 20;
-                        valid = true;
-                    }
+                    if(levelMap[r][c] === 0) { bx = c*40+20; by = r*40+20; valid = true; }
                 }
                 books.create(bx, by, 'book');
             }
             this.physics.add.overlap(player, books, collectBook, null, this);
 
-            // --- INPUT & UI ---
+            // --- UI ---
             cursors = this.input.keyboard.createCursorKeys();
             scoreText = this.add.text(16, 16, 'Skor: 0', { fontSize: '20px', fill: '#fff', backgroundColor: '#000' });
-            livesText = this.add.text(120, 16, 'Kesempatan: 3', { fontSize: '20px', fill: '#ff4444', backgroundColor: '#000' });
+            livesText = this.add.text(120, 16, 'Nyawa: 3', { fontSize: '20px', fill: '#ff4444', backgroundColor: '#000' });
         }
 
         function update() {
@@ -224,35 +259,40 @@
 
             player.setVelocity(0);
 
-            if (cursors.left.isDown) player.setVelocityX(-160);
-            else if (cursors.right.isDown) player.setVelocityX(160);
+            // LOGIKA GERAKAN: Cek Keyboard ATAU Touch
+            const speed = 160;
 
-            if (cursors.up.isDown) player.setVelocityY(-160);
-            else if (cursors.down.isDown) player.setVelocityY(160);
+            if (cursors.left.isDown || touchLeft) {
+                player.setVelocityX(-speed);
+            } else if (cursors.right.isDown || touchRight) {
+                player.setVelocityX(speed);
+            }
+
+            if (cursors.up.isDown || touchUp) {
+                player.setVelocityY(-speed);
+            } else if (cursors.down.isDown || touchDown) {
+                player.setVelocityY(speed);
+            }
         }
 
-        // --- INTERAKSI ---
+        // --- GAME LOGIC ---
 
         function hitEnemy(player, enemy) {
-            // Efek kena musuh
-            this.cameras.main.shake(200, 0.01); // Layar bergetar
-            
+            this.cameras.main.shake(200, 0.01);
             lives -= 1;
-            livesText.setText('Kesempatan: ' + lives);
+            livesText.setText('Nyawa: ' + lives);
 
             if(lives <= 0) {
                 player.setTint(0xff0000);
                 this.physics.pause();
                 document.getElementById('final-score').innerText = 'Skor: ' + score;
                 document.getElementById('game-over').style.display = 'flex';
+                // Sembunyikan kontrol saat game over
+                document.getElementById('mobile-controls').style.display = 'none';
             } else {
-                // Reset posisi player agar tidak mati terus menerus
                 player.setPosition(startPos.x, startPos.y);
-                // Beri efek kedip
                 player.setAlpha(0);
-                this.tweens.add({
-                    targets: player, alpha: 1, duration: 200, repeat: 3
-                });
+                this.tweens.add({ targets: player, alpha: 1, duration: 200, repeat: 3 });
             }
         }
 
@@ -260,6 +300,8 @@
             book.disableBody(true, true);
             this.physics.pause();
             isQuizActive = true;
+            // Sembunyikan kontrol saat kuis
+            if(window.innerWidth <= 1024) document.getElementById('mobile-controls').style.display = 'none';
             showQuestion();
         }
 
@@ -281,16 +323,21 @@
 
         function answerQuestion(selected, correct) {
             document.getElementById('ui-layer').style.display = 'none';
+            
+            // Tampilkan kembali kontrol
+            if(window.innerWidth <= 1024) document.getElementById('mobile-controls').style.display = 'grid';
+
             if(selected === correct) {
                 score += 10;
                 scoreText.setText('Skor: ' + score);
             } else {
                 lives -= 1;
-                livesText.setText('Kesempatan: ' + lives);
+                livesText.setText('Nyawa: ' + lives);
                 if(lives <= 0) {
                     document.getElementById('final-score').innerText = 'Skor: ' + score;
                     document.getElementById('game-over').style.display = 'flex';
-                    return; // Stop di sini
+                    document.getElementById('mobile-controls').style.display = 'none';
+                    return;
                 }
             }
             
